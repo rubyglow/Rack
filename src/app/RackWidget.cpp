@@ -6,6 +6,8 @@
 #include "asset.hpp"
 #include <map>
 #include <algorithm>
+#include <thread>
+#include <chrono>
 #include "osdialog.h"
 
 
@@ -59,12 +61,16 @@ void RackWidget::clear() {
 	gRackScene->scrollWidget->offset = Vec(0, 0);
 }
 
+void RackWidget::resetImpl() {
+	clear();
+	// Fails silently if file does not exist
+	load(assetLocal("template.vcv"));
+	lastPath = "";
+}
+
 void RackWidget::reset() {
 	if (osdialog_message(OSDIALOG_INFO, OSDIALOG_OK_CANCEL, "Clear patch and start over?")) {
-		clear();
-		// Fails silently if file does not exist
-		load(assetLocal("template.vcv"));
-		lastPath = "";
+		resetImpl();
 	}
 }
 
@@ -523,5 +529,30 @@ void RackWidget::onZoom(EventZoom &e) {
 	Widget::onZoom(e);
 }
 
+void RackWidget::runFunInGUI(fun_t _fun) {
+	{
+		std::unique_lock<std::mutex> lock(funLock);
+		fun = _fun;
+	}
+
+	// TODO: hack, needs better thread synchronization mechanism
+	while (true) {
+		{
+			std::unique_lock<std::mutex> lock(funLock);
+			if (!fun) break;
+		}
+		
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+	}
+}
+
+void RackWidget::processFun() {
+	std::unique_lock<std::mutex> lock(funLock);
+	if (fun) {
+		fun();
+		fun = NULL;
+	}
+}
+	
 
 } // namespace rack

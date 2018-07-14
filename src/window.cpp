@@ -488,6 +488,9 @@ void windowRun() {
 		if (visible) {
 			renderGui();
 		}
+		
+		// runs scheduled function from another thread, if there is any
+		gRackWidget->processFun();
 
 		// Limit framerate manually if vsync isn't working
 		double endTime = glfwGetTime();

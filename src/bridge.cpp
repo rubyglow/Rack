@@ -1,4 +1,6 @@
 #include "bridge.hpp"
+#include "plugin.hpp"
+#include "rack.hpp"
 #include "util/common.hpp"
 #include "dsp/ringbuffer.hpp"
 
@@ -15,7 +17,8 @@
 
 
 #include <thread>
-
+#include <utility>
+#include <memory>
 
 namespace rack {
 
@@ -122,6 +125,78 @@ struct BridgeClientConnection {
 		info("Bridge client closed");
 	}
 
+	json_t* jsonCommand(json_t* inputJ) {
+		json_t* outputJ = json_object();
+		std::string error = "ok";
+		json_t* commandJ = json_object_get(inputJ, "command");
+		if (commandJ == NULL || !json_is_string(commandJ)) {
+			error = "command node not found";
+		} else {
+			std::string command = json_string_value(commandJ);
+			if (command == "listPlugins") {
+				json_t *pluginsJ = json_object();
+				json_object_set_new(outputJ, "plugins", pluginsJ);
+				for (Plugin *plugin : gPlugins) {
+					for (Model *model : plugin->models) {
+						json_t *modelJ = json_object();
+						json_t *tagsJ = json_array();
+						std::string tags;
+						for (ModelTag tag : model->tags) {
+							if (tag != NO_TAG) {
+								json_array_append(tagsJ, json_string(gTagNames[tag].c_str()));
+							}
+						}
+						json_object_set_new(pluginsJ, model->slug.c_str(), modelJ);
+						json_object_set_new(modelJ, "author", json_string(model->author.c_str()));
+						json_object_set_new(modelJ, "name", json_string(model->name.c_str()));
+						json_object_set_new(modelJ, "tags", tagsJ);
+					}
+				}
+			} else if (command == "reset") {
+				gRackWidget->runFunInGUI([] { gRackWidget->resetImpl(); });
+			} else if (command == "createModule") {
+				json_t* slugJ = json_object_get(inputJ, "slug");
+				if (commandJ == NULL || !json_is_string(slugJ)) {
+					error = "slug node not found";
+				} else {
+					std::string slug = json_string_value(slugJ);
+					gRackWidget->runFunInGUI([slug, outputJ] { 
+						ModuleWidget *moduleWidget = NULL;
+						for (Plugin *plugin : gPlugins) {
+								for (Model *model : plugin->models) {
+									if (slug == model->slug) {
+										moduleWidget = model->createModuleWidget();
+										break;
+									}
+								}
+						}
+						if (moduleWidget) {
+							gRackWidget->addModule(moduleWidget);
+							moduleWidget->box.pos = Vec(0, 0);
+							gRackWidget->requestModuleBoxNearest(moduleWidget, moduleWidget->box);
+							
+							// TODO: get top left absolute position on desktop of the module
+							Vec topLeft(0, 61);
+							float zoom = gRackScene->zoomWidget->zoom;
+							
+							Vec pos = moduleWidget->box.pos.mult(zoom).plus(topLeft);
+							json_t *posJ = json_pack("[i, i]", (int) pos.x, (int) pos.y);
+							json_object_set_new(outputJ, "pos", posJ);
+
+							Vec size = moduleWidget->box.size.mult(zoom);
+							json_t *sizeJ = json_pack("[i, i]", (int) size.x, (int) size.y);
+							json_object_set_new(outputJ, "size", sizeJ);
+						}
+					});
+				}
+			} else {
+				error = "invalid command";
+			}
+		}
+		json_object_set_new(outputJ, "error", json_string(error.c_str()));
+		return outputJ;
+	}
+
 	/** Accepts a command from the client */
 	void step() {
 		uint8_t command;
@@ -182,6 +257,41 @@ struct BridgeClientConnection {
 					return;
 				}
 				// flush();
+			} break;
+
+			case JSON_COMMAND: {
+				uint32_t inputLen = 0;
+				if (!recv<uint32_t>(&inputLen)) {
+					debug("Failed to receive");
+					return;
+				}
+				printf("input length: %i\n", inputLen);
+				std::unique_ptr<char[]> input(new char[inputLen + 1]);
+				if (!recv(input.get(), inputLen * sizeof(char))) {
+					debug("Failed to receive");
+					return;
+				}
+				input[inputLen] = 0;
+				printf("input: %s\n", input.get());
+				json_error_t error;
+				json_t* root = json_loads(input.get(), 0, &error);
+				if (!root) {
+					debug("json parsing error");
+					return;
+				}
+				json_t* outputJ = jsonCommand(root);
+				std::string output = json_dumps(outputJ, JSON_INDENT(2) | JSON_REAL_PRECISION(9));
+				json_decref(root);
+				json_decref(outputJ);
+				uint32_t outputLen = output.size();
+				if (!send(&outputLen, sizeof(uint32_t))) {
+					debug("Failed to send");
+					return;
+				}
+				if (!send(output.c_str(), outputLen)) {
+					debug("Failed to send");
+					return;
+				}
 			} break;
 		}
 	}

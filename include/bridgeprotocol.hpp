@@ -49,6 +49,15 @@ enum BridgeCommand {
 	- float output[BRIDGE_OUTPUTS * frames]
 	*/
 	AUDIO_PROCESS_COMMAND,
+	/** A command in json format.
+	- uint32_t inputLen: number of bytes for the following json command
+	- char input[inputLen]: the json command
+	- uint32_t outputLen: number of bytes for the following json text
+	- char json[outputLen]: the response in json format
+	Note: this is not intended for real time processing, might cause problems
+	with the audio commands, so use it only for setup configuration etc.
+	*/
+	JSON_COMMAND,
 	NUM_COMMANDS
 };
 

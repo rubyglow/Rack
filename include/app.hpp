@@ -154,6 +154,10 @@ struct RackWidget : OpaqueWidget {
 	std::string lastPath;
 	Vec lastMousePos;
 	bool lockModules = false;
+	
+	typedef std::function<void(void)> fun_t;
+	std::mutex funLock;
+	fun_t fun;
 
 	RackWidget();
 	~RackWidget();
@@ -161,6 +165,7 @@ struct RackWidget : OpaqueWidget {
 	/** Completely clear the rack's modules and wires */
 	void clear();
 	/** Clears the rack and loads the template patch */
+	void resetImpl();
 	void reset();
 	void loadDialog();
 	void saveDialog();
@@ -192,6 +197,12 @@ struct RackWidget : OpaqueWidget {
 	void onMouseMove(EventMouseMove &e) override;
 	void onMouseDown(EventMouseDown &e) override;
 	void onZoom(EventZoom &e) override;
+	
+	/** Runs a function from another thread in the context of this thread, and waits until the function is finished */
+	void runFunInGUI(fun_t fun);
+
+	/** Called from the windowRun function, to process a scheduled function from another thread */
+	void processFun();
 };
 
 struct RackRail : TransparentWidget {
